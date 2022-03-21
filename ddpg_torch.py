@@ -56,11 +56,11 @@ class ReplayBuffer(object):
 
         states = self.state_memory[batch]
         new_states = self.new_state_memory[batch]
-        reward = self.reward_memory[batch]
+        rewards = self.reward_memory[batch]
         actions = self.action_memory[batch]
         terminal = self.terminal_memory[batch]
 
-        return states, actions, reward, new_states, terminal
+        return states, actions, rewards, new_states, terminal
 
 
 class CriticNetwork(nn.Module):
@@ -84,12 +84,12 @@ class CriticNetwork(nn.Module):
         f1 = 1 / np.sqrt(self.fc1.weight.data.size()[0])
         T.nn.init.uniform_(self.fc1.weight.data, -f1, f1)
         T.nn.init.uniform_(self.fc1.bias.data, -f1, f1)
-        self.bn1 = nn.LayerNorm(self, fc1_dims)
+        self.bn1 = nn.LayerNorm(self.fc1_dims)
 
         self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
         f2 = 1 / np.sqrt(self.fc2.weight.data.size()[0])
         T.nn.init.uniform_(self.fc2.weight.data, -f2, f2)
-        self.bn2 = nn.LayerNorm(self, fc2_dims)
+        self.bn2 = nn.LayerNorm(self.fc2_dims)
 
         self.action_value = nn.Linear(self.n_actions, self.fc2_dims)
         f3 = 0.003
@@ -141,16 +141,16 @@ class ActorNetwork(nn.Module):
         self.fc1_dims = fc1_dims
         self.fc2_dims = fc2_dims
         self.checkpoint_file = os.path.join(chkpt_dir, name + "_ddpg")
-        self.fc1 = nn.Linear(*self.inputs_dims, self.fc1_dims)
+        self.fc1 = nn.Linear(*self.input_dims, self.fc1_dims)
         f1 = 1 / np.sqrt(self.fc1.weight.data.size()[0])
         T.nn.init.uniform_(self.fc1.weight.data, -f1, f1)
         T.nn.init.uniform_(self.fc1.bias.data, -f1, f1)
-        self.bn1 = nn.LayerNorm(self, fc1_dims)
+        self.bn1 = nn.LayerNorm(self.fc1_dims)
 
         self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
         f2 = 1 / np.sqrt(self.fc2.weight.data.size()[0])
         T.nn.init.uniform_(self.fc2.weight.data, -f2, f2)
-        self.bn2 = nn.LayerNorm(self, fc2_dims)
+        self.bn2 = nn.LayerNorm(self.fc2_dims)
 
         f3 = 0.003
         self.mu = nn.Linear(self.fc2_dims, self.n_actions)
@@ -245,7 +245,7 @@ class Agent(object):
         self.actor.eval()
         observation = T.tensor(observation, dtype=T.float).to(self.actor.device)
         mu = self.actor(observation).to(self.actor.device)
-        mu_prime = mu + T.tensor(self.noise, dtype=T.float).to(self.actor.device)
+        mu_prime = mu + T.tensor(self.noise(), dtype=T.float).to(self.actor.device)
 
         self.actor.train()
         return mu_prime.cpu().detach().numpy()
@@ -256,7 +256,9 @@ class Agent(object):
     def learn(self):
         if self.memory.mem_cntr < self.batch_size:
             return
-        state, action, new_state, done = self.memory.sample_buffer(self.batch_size)
+        state, action, reward, new_state, done = self.memory.sample_buffer(
+            self.batch_size
+        )
 
         reward = T.tensor(reward, dtype=T.float).to(self.critic.device)
         done = T.tensor(done).to(self.critic.device)
@@ -273,7 +275,7 @@ class Agent(object):
         critic_value = self.critic.forward(state, action)
 
         target = []
-        for j in range(self.bath_size):
+        for j in range(self.batch_size):
             target.append(reward[j] + self.gamma * critic_value[j] * done[j])
         target = T.tensor(target).to(self.critic.device)
         target = target.view(self.batch_size, 1)
